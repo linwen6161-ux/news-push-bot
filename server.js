@@ -42,7 +42,7 @@ cron.schedule('*/10 * * * *', async () => {
     const jsonObj = parser.parse(res.data);
     const items = jsonObj.rss?.channel?.item || [];
 
-    for (const item of items.slice(0, 10)) {
+    for (const item of items.slice(0, 50)) {
       const title = item.title || '';
       const link = item.link || '';
 
