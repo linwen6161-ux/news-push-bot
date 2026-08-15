@@ -12,8 +12,8 @@ let users = [];
 // 記錄已經推播過的新聞，避免重複推播
 let sentArticleUrls = new Set();
 
-// 接收前端 APP 傳來的推播註冊資料
-app.post('/api/register-push', (req, res) => {
+// 接收前端 APP 傳來的推播註冊資料 (路徑修正為 '/register')
+app.post('/register', (req, res) => {
   const { token, keywords } = req.body;
   if (!token) return res.status(400).json({ error: '缺少 Push Token' });
 
@@ -34,7 +34,11 @@ cron.schedule('*/10 * * * *', async () => {
 
   try {
     const res = await axios.get(feedUrl);
-    const parser = new XMLParser();
+    // 突破實體擴展 1000 則限制
+    const parser = new XMLParser({
+        processEntities: false,
+        entityExpansionLimit: 100000
+    });
     const jsonObj = parser.parse(res.data);
     const items = jsonObj.rss?.channel?.item || [];
 
