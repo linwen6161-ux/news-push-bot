@@ -33,12 +33,23 @@ cron.schedule('*/10 * * * *', async () => {
     const parser = new XMLParser({ processEntities: false, entityExpansionLimit: 100000 });
     const jsonObj = parser.parse(res.data);
     const items = jsonObj.rss?.channel?.item || [];
+    
+    const now = new Date();
 
-    for (const item of items.slice(0, 50)) {
+    // 🌟 網子加倍！擴大掃描 100 則，保證 1 小時內的新聞絕不漏網！
+    for (const item of items.slice(0, 100)) {
       const title = item.title || '';
       const link = item.link || '';
       
-      // 🌟 新增：剝離 HTML 並抓取乾淨的新聞內文摘要
+      let hoursDiff = 0;
+      const pubDateStr = item.pubDate || item.published || item.updated;
+      if (pubDateStr) {
+        const pubDate = new Date(pubDateStr);
+        hoursDiff = (now - pubDate) / (1000 * 60 * 60);
+        // 🌟 放寬至 12 小時限制
+        if (hoursDiff > 12) continue;
+      }
+      
       let description = item.description || item['content:encoded'] || '';
       if (typeof description === 'object') description = description['#text'] || description['__cdata'] || '';
       description = String(description).replace(/<[^>]*>?/gm, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -46,16 +57,21 @@ cron.schedule('*/10 * * * *', async () => {
       if (sentArticleUrls.has(link)) continue;
 
       for (const user of users) {
-        // 🌟 升級：雙重比對，只要標題或內文中其一命中即可
         const isMatched = user.keywords.some(kw => {
           const keyword = kw.toLowerCase();
           return title.toLowerCase().includes(keyword) || description.toLowerCase().includes(keyword);
         });
         
         if (isMatched) {
-          // 讓推播視窗顯示新聞內文前 80 個字，取代掉原本死板的「關鍵字通報」
           const pushBody = description ? (description.substring(0, 80) + '...') : '點擊查看詳細新聞內容';
-          await sendPushNotification(user.token, `🔔 ${title}`, pushBody, link);
+          
+          // 🌟 核心重點：如果是 1 小時內的新聞，標題加上強力醒目提示！
+          let pushTitle = `🔔 ${title}`;
+          if (hoursDiff <= 1) {
+             pushTitle = `🔥 [1H內快訊] ${title}`;
+          }
+
+          await sendPushNotification(user.token, pushTitle, pushBody, link);
         }
       }
       sentArticleUrls.add(link);
