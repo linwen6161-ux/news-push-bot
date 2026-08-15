@@ -7,12 +7,9 @@ const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-// 記錄已註冊的使用者清單 (Token 與 關鍵字)
 let users = [];
-// 記錄已經推播過的新聞，避免重複推播
 let sentArticleUrls = new Set();
 
-// 接收前端 APP 傳來的推播註冊資料 (路徑修正為 '/register')
 app.post('/register', (req, res) => {
   const { token, keywords } = req.body;
   if (!token) return res.status(400).json({ error: '缺少 Push Token' });
@@ -27,32 +24,38 @@ app.post('/register', (req, res) => {
   res.json({ success: true });
 });
 
-// 每 10 分鐘自動檢查一次新聞並推播
 cron.schedule('*/10 * * * *', async () => {
-  console.log('🔄 機器人正在抓取全台即時新聞...');
+  console.log('🔄 機器人正在抓取全台即時新聞與內文...');
   const feedUrl = 'https://news.google.com/rss?hl=zh-TW&gl=TW&ceid=TW:zh-Hant';
 
   try {
     const res = await axios.get(feedUrl);
-    // 突破實體擴展 1000 則限制
-    const parser = new XMLParser({
-        processEntities: false,
-        entityExpansionLimit: 100000
-    });
+    const parser = new XMLParser({ processEntities: false, entityExpansionLimit: 100000 });
     const jsonObj = parser.parse(res.data);
     const items = jsonObj.rss?.channel?.item || [];
 
     for (const item of items.slice(0, 50)) {
       const title = item.title || '';
       const link = item.link || '';
+      
+      // 🌟 新增：剝離 HTML 並抓取乾淨的新聞內文摘要
+      let description = item.description || item['content:encoded'] || '';
+      if (typeof description === 'object') description = description['#text'] || description['__cdata'] || '';
+      description = String(description).replace(/<[^>]*>?/gm, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
       if (sentArticleUrls.has(link)) continue;
 
-      // 檢查有哪些使用者的關鍵字有命中
       for (const user of users) {
-        const isMatched = user.keywords.some(kw => title.toLowerCase().includes(kw.toLowerCase()));
+        // 🌟 升級：雙重比對，只要標題或內文中其一命中即可
+        const isMatched = user.keywords.some(kw => {
+          const keyword = kw.toLowerCase();
+          return title.toLowerCase().includes(keyword) || description.toLowerCase().includes(keyword);
+        });
+        
         if (isMatched) {
-          await sendPushNotification(user.token, '🔔 關鍵字即時新聞通報', title);
+          // 讓推播視窗顯示新聞內文前 80 個字，取代掉原本死板的「關鍵字通報」
+          const pushBody = description ? (description.substring(0, 80) + '...') : '點擊查看詳細新聞內容';
+          await sendPushNotification(user.token, `🔔 ${title}`, pushBody, link);
         }
       }
       sentArticleUrls.add(link);
@@ -62,13 +65,14 @@ cron.schedule('*/10 * * * *', async () => {
   }
 });
 
-async function sendPushNotification(expoToken, title, body) {
+async function sendPushNotification(expoToken, title, body, newsUrl) {
   try {
     await axios.post('https://exp.host/--/api/v2/push/send', {
       to: expoToken,
       sound: 'default',
       title,
       body,
+      data: { url: newsUrl }
     });
     console.log(`🚀 推播成功送出給: ${expoToken}`);
   } catch (e) {
@@ -76,5 +80,5 @@ async function sendPushNotification(expoToken, title, body) {
   }
 }
 
-app.get('/', (req, res) => res.send('🚀 媒訊通報 24 小時雲端推播主機運作中！'));
+app.get('/', (req, res) => res.send('🚀 媒訊通報 24 小時雙重比對主機運作中！'));
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
